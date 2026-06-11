@@ -1,0 +1,49 @@
+{
+  "name": "@hatkom/lint-tools",
+  "version": "0.0.0-development",
+  "description": "Dead-code lint tools for NestJS + GraphQL monorepos: find unused GraphQL fields and unused service methods.",
+  "author": "Max Schmide",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Hatkom-io/lint-tools.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Hatkom-io/lint-tools/issues"
+  },
+  "homepage": "https://github.com/Hatkom-io/lint-tools#readme",
+  "bin": {
+    "find-unused-graphql": "dist/find-unused-graphql.js",
+    "find-unused-service-methods": "dist/find-unused-service-methods.js"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "rm -rf ./dist tsconfig.tsbuildinfo && tsc",
+    "bump": "bunx npm-check-updates -u --deep -p bun && bun i && bun update"
+  },
+  "keywords": [
+    "lint",
+    "dead-code",
+    "graphql",
+    "nestjs",
+    "monorepo",
+    "ts-morph"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@graphql-inspector/cli": "^6.0.8",
+    "graphql": "^16.13.2",
+    "ts-morph": "^27.0.2"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.16",
+    "@semantic-release/changelog": "^6.0.3",
+    "@semantic-release/git": "^10.0.1",
+    "@semantic-release/github": "^10.3.5",
+    "@types/bun": "latest",
+    "@types/node": "^25.6.0",
+    "typescript": "^6.0.3"
+  }
+}
