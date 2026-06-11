@@ -35,7 +35,10 @@ Conventions baked in:
 
 ## Tools
 
-### `find-unused-graphql`
+A single `lint-tools` binary runs every check below in sequence and exits `1`
+if any of them report dead code.
+
+### Unused GraphQL fields
 
 Finds GraphQL surface area no frontend ever selects: root `@Query`/`@Mutation`,
 `@ResolveField`, and orphan object types. Since every consumer lives in the
@@ -50,7 +53,7 @@ slip through silently).
 
 > Requires a fresh `apps/api/schema.gql` — generate the schema first.
 
-### `find-unused-service-methods`
+### Unused service methods
 
 Finds public methods / arrow-function properties on `@Injectable()` NestJS
 services with zero call sites (via ts-morph reference analysis). Skips private
@@ -68,11 +71,10 @@ bun add -D @hatkom/lint-tools
 // package.json
 {
   "scripts": {
-    "lint:graphql": "find-unused-graphql",
-    "lint:services": "find-unused-service-methods"
+    "lint:dead-code": "lint-tools"
   }
 }
 ```
 
-Both ship with a `#!/usr/bin/env bun` shebang and use Bun runtime APIs — run
-them with Bun.
+Ships with a `#!/usr/bin/env bun` shebang and uses Bun runtime APIs — run it
+with Bun.

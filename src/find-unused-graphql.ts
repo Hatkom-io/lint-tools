@@ -1,5 +1,3 @@
-#!/usr/bin/env bun
-
 /**
  * Finds unused GraphQL fields in the API.
  *
@@ -18,9 +16,9 @@
  * args, and input types) are also skipped from the orphan-type and
  * unused-field checks.
  *
- * Run from the consumer monorepo root: `find-unused-graphql`
+ * Run from the consumer monorepo root via `lint-tools`.
  *
- * Exits 1 if any unused internal item is found, or if any resolver entry
+ * Returns 1 if any unused internal item is found, or if any resolver entry
  * could not be parsed (so unused fields cannot silently slip through).
  */
 
@@ -212,13 +210,13 @@ const extractEntries = async (): Promise<{
   return { entries, unparseable }
 }
 
-const main = async () => {
+export const findUnusedGraphql = async (): Promise<number> => {
   const frontendApps = discoverFrontendApps()
   if (frontendApps.length === 0) {
     console.error(
       '❌ No frontend apps with a `graphql-env.ts` were found under `apps/`.',
     )
-    process.exit(1)
+    return 1
   }
   const documentsGlob = buildDocumentsGlob(frontendApps)
 
@@ -394,7 +392,7 @@ const main = async () => {
     unparseable.length === 0
   ) {
     console.log('✅ All GraphQL fields are used!')
-    process.exit(0)
+    return 0
   }
 
   console.log(
@@ -437,10 +435,5 @@ const main = async () => {
   )
   console.log('Remove unused items, or add @ApiKeyAuth if used externally.\n')
 
-  process.exit(1)
+  return 1
 }
-
-main().catch((error: unknown) => {
-  console.error(error)
-  process.exit(1)
-})

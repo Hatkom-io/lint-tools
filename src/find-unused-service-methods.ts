@@ -1,5 +1,3 @@
-#!/usr/bin/env bun
-
 /**
  * Finds unused public methods/properties on NestJS service classes.
  *
@@ -16,9 +14,9 @@
  *   - Decorated members (assumed framework-invoked, e.g. @Cron, @OnEvent)
  *   - NestJS lifecycle hooks
  *
- * Run from the consumer monorepo root: `find-unused-service-methods`
+ * Run from the consumer monorepo root via `lint-tools`.
  *
- * Exits 1 if any unused method/property is found.
+ * Returns 1 if any unused method/property is found.
  */
 
 import { join, relative } from 'node:path'
@@ -134,7 +132,7 @@ const collectDead = (cls: ClassDeclaration, file: string): Dead[] => {
   })
 }
 
-const main = async () => {
+export const findUnusedServiceMethods = async (): Promise<number> => {
   console.log('Loading TypeScript project…')
   const project = new Project({ tsConfigFilePath })
 
@@ -151,7 +149,7 @@ const main = async () => {
 
   if (dead.length === 0) {
     console.log('✅ All service methods are used!')
-    process.exit(0)
+    return 0
   }
 
   console.log(`⚠️  Found ${dead.length} unused service members:\n`)
@@ -172,10 +170,5 @@ const main = async () => {
   }
 
   console.log('Remove unused members, or @Inject into another consumer.\n')
-  process.exit(1)
+  return 1
 }
-
-main().catch((error: unknown) => {
-  console.error(error)
-  process.exit(1)
-})

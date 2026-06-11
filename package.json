@@ -13,8 +13,7 @@
   },
   "homepage": "https://github.com/Hatkom-io/lint-tools#readme",
   "bin": {
-    "find-unused-graphql": "dist/find-unused-graphql.js",
-    "find-unused-service-methods": "dist/find-unused-service-methods.js"
+    "lint-tools": "dist/cli.js"
   },
   "files": ["dist"],
   "scripts": {
