@@ -163,8 +163,16 @@ const parseField = (
 ): { fieldName: string; parentType: string } | null => {
   if (kind === 'ResolveField') {
     const [, methodName] = /^\s*(?:async\s+)?(\w+)\s*\(/.exec(signature) ?? []
-    const [, parentTypeName] =
+    // @Parent() is auto-injected by @hatkom/nestjs-graphql-plugin, so it may be
+    // absent from source. Prefer an explicit @Parent() annotation; otherwise the
+    // parent is always the resolver's first parameter — read its type.
+    const [, explicitParentType] =
       /@Parent\(\)[^:]*:\s*([A-Z][A-Za-z0-9_]*)/.exec(signature) ?? []
+    const [, firstParamType] =
+      /\(\s*(?:@\w+\([^)]*\)\s*)?(?:\{[^}]*\}|\w+)\s*:\s*([A-Z][A-Za-z0-9_]*)/.exec(
+        signature,
+      ) ?? []
+    const parentTypeName = explicitParentType ?? firstParamType
     if (!methodName || !parentTypeName) {
       return null
     }
@@ -197,12 +205,22 @@ const parseReturnType = (decoratorBlock: string): string | null => {
 const parseParentDestructure = (
   signature: string,
 ): ParentDestructure | null => {
-  if (!/@Parent\(\)/.test(signature)) {
+  // The parent is either an explicit @Parent()-decorated param or, since the
+  // plugin auto-injects @Parent(), the resolver's first parameter.
+  const [, explicitParent] =
+    /@Parent\(\)\s*(\{[^}]*\}|\w+)/.exec(signature) ?? []
+  const [, firstParam] =
+    /\(\s*(?:@\w+\([^)]*\)\s*)?(\{[^}]*\}|\w+)\s*:/.exec(signature) ?? []
+  const parentParam = explicitParent ?? firstParam
+  if (!parentParam) {
     return null
   }
-  const [, body] = /@Parent\(\)\s*\{\s*([^}]+)\s*\}/.exec(signature) ?? []
+  if (!parentParam.startsWith('{')) {
+    // Non-destructured parent: Type — treat whole parent as used
+    return { fields: new Set(), spreadAll: true }
+  }
+  const [, body] = /\{\s*([^}]*)\s*\}/.exec(parentParam) ?? []
   if (!body) {
-    // Non-destructured @Parent() parent: Type — treat whole parent as used
     return { fields: new Set(), spreadAll: true }
   }
   return body.split(',').reduce<ParentDestructure>(
