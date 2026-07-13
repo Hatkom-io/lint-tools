@@ -1,3 +1,10 @@
+## [1.2.1](https://github.com/Hatkom-io/lint-tools/compare/v1.2.0...v1.2.1) (2026-07-13)
+
+
+### Bug Fixes
+
+* parse @ResolveField parent type when @Parent() is auto-injected ([9f9f8d8](https://github.com/Hatkom-io/lint-tools/commit/9f9f8d8aa30af8077353fa8531ced244dee9c170))
+
 # [1.2.0](https://github.com/Hatkom-io/lint-tools/compare/v1.1.0...v1.2.0) (2026-06-11)
 
 
