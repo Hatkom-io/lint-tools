@@ -1,6 +1,6 @@
 {
   "name": "@hatkom/lint-tools",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Dead-code lint tools for NestJS + GraphQL monorepos: find unused GraphQL fields and unused service methods.",
   "author": "Max Schmide",
   "license": "MIT",
