@@ -3,7 +3,10 @@
  *
  * Since all GraphQL consumers live in this monorepo, any field not selected
  * by frontend code is unused. The set of frontend apps is discovered at
- * runtime by scanning `apps/*` for a `graphql-env.ts` file.
+ * runtime by scanning `apps/*` for a `graphql-env.ts` file whose gql.tada
+ * `schema` resolves to `apps/api/schema.gql`. A monorepo may host several
+ * backends; an app bound to a different schema selects fields this schema
+ * has never heard of, which graphql-inspector's coverage cannot represent.
  *
  * Detects:
  *   - Root @Query / @Mutation never selected by any frontend
@@ -40,7 +43,7 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, relative } from 'node:path'
+import { join, relative, resolve } from 'node:path'
 import { Glob } from 'bun'
 import {
   buildSchema,
@@ -58,12 +61,35 @@ const tsConfigFilePath = join(repoRoot, 'apps/api/tsconfig.json')
 const apiSrc = join(repoRoot, 'apps/api/src')
 const coveragePath = join(tmpdir(), 'graphql-coverage.json')
 
+const schemaConfigPattern = /"schema"\s*:\s*"([^"]+)"/
+
+/**
+ * Reads the gql.tada `schema` path out of an app's tsconfig. A monorepo may
+ * host more than one backend, and an app's documents are only valid against
+ * the schema they were generated from.
+ */
+const readAppSchemaPath = (appDir: string): string | null => {
+  const tsconfigPath = join(appDir, 'tsconfig.json')
+  if (!existsSync(tsconfigPath)) {
+    return null
+  }
+
+  const [, configuredSchema] =
+    schemaConfigPattern.exec(readFileSync(tsconfigPath, 'utf-8')) ?? []
+  if (!configuredSchema) {
+    return null
+  }
+
+  return resolve(appDir, configuredSchema)
+}
+
 const discoverFrontendApps = (): string[] => {
   const appsDir = join(repoRoot, 'apps')
   return readdirSync(appsDir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && entry.name !== 'api')
     .map((entry) => entry.name)
     .filter((name) => existsSync(join(appsDir, name, 'graphql-env.ts')))
+    .filter((name) => readAppSchemaPath(join(appsDir, name)) === schemaPath)
     .sort()
 }
 
