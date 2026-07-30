@@ -1,3 +1,10 @@
+# [1.3.0](https://github.com/Hatkom-io/lint-tools/compare/v1.2.1...v1.3.0) (2026-07-30)
+
+
+### Features
+
+* support several apis under monorepo ([394e036](https://github.com/Hatkom-io/lint-tools/commit/394e0369dfbcc6322009418c3fb33e13ce2c71e2))
+
 ## [1.2.1](https://github.com/Hatkom-io/lint-tools/compare/v1.2.0...v1.2.1) (2026-07-13)
 
 
