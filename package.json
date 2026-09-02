@@ -34,17 +34,17 @@
     "access": "public"
   },
   "dependencies": {
-    "@graphql-inspector/cli": "^6.0.8",
-    "graphql": "^16.13.2",
-    "ts-morph": "^27.0.2"
+    "@graphql-inspector/cli": "^7.0.0",
+    "graphql": "^17.0.2",
+    "ts-morph": "^28.0.0"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.16",
-    "@semantic-release/changelog": "^6.0.3",
-    "@semantic-release/git": "^10.0.1",
-    "@semantic-release/github": "^10.3.5",
+    "@biomejs/biome": "^2.5.11",
+    "@semantic-release/changelog": "^7.0.0",
+    "@semantic-release/git": "^11.0.1",
+    "@semantic-release/github": "^12.0.9",
     "@types/bun": "latest",
-    "@types/node": "^25.6.0",
-    "typescript": "^6.0.3"
+    "@types/node": "^26.4.1",
+    "typescript": "^7.0.2"
   }
 }
