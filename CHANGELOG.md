@@ -1,3 +1,10 @@
+# [1.4.0](https://github.com/Hatkom-io/lint-tools/compare/v1.3.0...v1.4.0) (2026-09-21)
+
+
+### Features
+
+* support multi api apps for linting ([4cc491d](https://github.com/Hatkom-io/lint-tools/commit/4cc491d09daaf8e6082c100cd29fbb5a9ffaf281))
+
 # [1.3.0](https://github.com/Hatkom-io/lint-tools/compare/v1.2.1...v1.3.0) (2026-07-30)
 
 
