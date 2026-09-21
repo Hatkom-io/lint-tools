@@ -2,10 +2,11 @@
  * Finds unused GraphQL fields in the API.
  *
  * Since all GraphQL consumers live in this monorepo, any field not selected
- * by frontend code is unused. The set of frontend apps is discovered at
- * runtime by scanning `apps/*` for a `graphql-env.ts` file whose gql.tada
- * `schema` resolves to `apps/api/schema.gql`. A monorepo may host several
- * backends; an app bound to a different schema selects fields this schema
+ * by frontend code is unused. Every API app is checked in turn: `apps/api`
+ * plus any `apps/*-api` (e.g. `portal-api`, `sfs-api`). For each one, the set
+ * of frontend apps is discovered at runtime by scanning `apps/*` for a
+ * `graphql-env.ts` file whose gql.tada `schema` resolves to that API's
+ * `schema.gql`; an app bound to a different schema selects fields this schema
  * has never heard of, which graphql-inspector's coverage cannot represent.
  *
  * Detects:
@@ -29,7 +30,7 @@
  * recursing through schema input definitions.
  *
  * DTO classes (.model.ts / .input.ts) and backend property accesses are
- * parsed with ts-morph against `apps/api/tsconfig.json`. Resolver decorators
+ * parsed with ts-morph against the API app's `tsconfig.json`. Resolver decorators
  * are still parsed line-by-line — the @Parent()/@Query/@ResolveField shapes
  * are stable enough that the regex heuristics report (rather than silently
  * skip) anything they cannot read.
@@ -54,12 +55,9 @@ import {
   isUnionType,
 } from 'graphql'
 import { ClassDeclaration, Project, SyntaxKind } from 'ts-morph'
+import { type ApiApp, discoverApiApps, isApiAppName } from './discover-apis'
 
 const repoRoot = process.cwd()
-const schemaPath = join(repoRoot, 'apps/api/schema.gql')
-const tsConfigFilePath = join(repoRoot, 'apps/api/tsconfig.json')
-const apiSrc = join(repoRoot, 'apps/api/src')
-const coveragePath = join(tmpdir(), 'graphql-coverage.json')
 
 const schemaConfigPattern = /"schema"\s*:\s*"([^"]+)"/
 
@@ -83,13 +81,13 @@ const readAppSchemaPath = (appDir: string): string | null => {
   return resolve(appDir, configuredSchema)
 }
 
-const discoverFrontendApps = (): string[] => {
+const discoverFrontendApps = (app: ApiApp): string[] => {
   const appsDir = join(repoRoot, 'apps')
   return readdirSync(appsDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && entry.name !== 'api')
+    .filter((entry) => entry.isDirectory() && !isApiAppName(entry.name))
     .map((entry) => entry.name)
     .filter((name) => existsSync(join(appsDir, name, 'graphql-env.ts')))
-    .filter((name) => readAppSchemaPath(join(appsDir, name)) === schemaPath)
+    .filter((name) => readAppSchemaPath(join(appsDir, name)) === app.schemaPath)
     .sort()
 }
 
@@ -270,7 +268,9 @@ const parseParentDestructure = (
   )
 }
 
-const extractEntries = async (): Promise<{
+const extractEntries = async (
+  app: ApiApp,
+): Promise<{
   entries: Entry[]
   parentNeeds: Map<string, ParentDestructure>
   unparseable: Unparseable[]
@@ -280,8 +280,8 @@ const extractEntries = async (): Promise<{
   const unparseable: Unparseable[] = []
   const glob = new Glob('**/*.resolver.ts')
 
-  for await (const file of glob.scan(apiSrc)) {
-    const content = await Bun.file(join(apiSrc, file)).text()
+  for await (const file of glob.scan(app.srcPath)) {
+    const content = await Bun.file(join(app.srcPath, file)).text()
     const lines = content.split('\n')
 
     for (let i = 0; i < lines.length; i++) {
@@ -299,7 +299,7 @@ const extractEntries = async (): Promise<{
       const methodLineIndex = findMethodLine(lines, i)
       if (methodLineIndex === -1) {
         unparseable.push({
-          file: `apps/api/src/${file}`,
+          file: `${app.appPath}/src/${file}`,
           line: i + 1,
           decoratorKind,
           reason: 'no method signature found within 10 lines after decorator',
@@ -313,7 +313,7 @@ const extractEntries = async (): Promise<{
       const parsed = parseField(decoratorKind, signature)
       if (!parsed) {
         unparseable.push({
-          file: `apps/api/src/${file}`,
+          file: `${app.appPath}/src/${file}`,
           line: methodLineIndex + 1,
           decoratorKind,
           reason:
@@ -331,7 +331,7 @@ const extractEntries = async (): Promise<{
         parentType: parsed.parentType,
         fieldName: parsed.fieldName,
         returnType: parseReturnType(decoratorBlock),
-        file: `apps/api/src/${file}`,
+        file: `${app.appPath}/src/${file}`,
         line: methodLineIndex + 1,
         hasApiKeyAuth: hasApiKeyAuth(lines, i - 5, methodLineIndex - 1),
       })
@@ -373,12 +373,13 @@ const decoratorNameArg = (
 
 const extractDtos = (
   project: Project,
+  app: ApiApp,
 ): { dtoBySchemaName: Map<string, DtoInfo>; hiddenFieldPairs: Set<string> } => {
   const dtoBySchemaName = new Map<string, DtoInfo>()
   const hiddenFieldPairs = new Set<string>()
 
   const dtoFiles = project
-    .getSourceFiles(join(apiSrc, '**/*.{model,input}.ts'))
+    .getSourceFiles(join(app.srcPath, '**/*.{model,input}.ts'))
     .filter((sf) => !sf.getFilePath().includes('/node_modules/'))
 
   for (const sf of dtoFiles) {
@@ -437,17 +438,19 @@ const extractDtos = (
  * selected by a frontend is alive (it feeds internal logic), so it belongs in
  * the @HideField() bucket rather than the delete bucket.
  */
-const extractBackendAccesses = (project: Project): Set<string> => {
+const extractBackendAccesses = (project: Project, app: ApiApp): Set<string> => {
   const accessed = new Set<string>()
 
-  const files = project.getSourceFiles(join(apiSrc, '**/*.ts')).filter((sf) => {
-    const path = sf.getFilePath()
-    return (
-      !path.includes('/node_modules/') &&
-      !path.includes('/@generated/') &&
-      !/\.(model|input|args)\.ts$/.test(path)
-    )
-  })
+  const files = project
+    .getSourceFiles(join(app.srcPath, '**/*.ts'))
+    .filter((sf) => {
+      const path = sf.getFilePath()
+      return (
+        !path.includes('/node_modules/') &&
+        !path.includes('/@generated/') &&
+        !/\.(model|input|args)\.ts$/.test(path)
+      )
+    })
 
   for (const sf of files) {
     for (const access of sf.getDescendantsOfKind(
@@ -460,11 +463,26 @@ const extractBackendAccesses = (project: Project): Set<string> => {
   return accessed
 }
 
-export const findUnusedGraphql = async (): Promise<number> => {
-  const frontendApps = discoverFrontendApps()
+const runForApp = async (app: ApiApp): Promise<number> => {
+  if (!existsSync(app.tsConfigFilePath)) {
+    console.error(
+      `❌ No \`${app.appPath}/tsconfig.json\` found — it is required to load the project.`,
+    )
+    return 1
+  }
+
+  if (!existsSync(app.schemaPath)) {
+    console.error(
+      `❌ No \`${app.appPath}/schema.gql\` found — generate the schema first.`,
+    )
+    return 1
+  }
+
+  const coveragePath = join(tmpdir(), `graphql-coverage-${app.name}.json`)
+  const frontendApps = discoverFrontendApps(app)
   if (frontendApps.length === 0) {
     console.error(
-      '❌ No frontend apps with a `graphql-env.ts` were found under `apps/`.',
+      `❌ No frontend apps bound to \`${app.appPath}/schema.gql\` were found under \`apps/\`.`,
     )
     return 1
   }
@@ -473,19 +491,27 @@ export const findUnusedGraphql = async (): Promise<number> => {
   console.log(
     `Running graphql-inspector coverage against: ${frontendApps.join(', ')}`,
   )
-  execFileSync(
-    'bunx',
-    [
-      'graphql-inspector',
-      'coverage',
-      documentsGlob,
-      schemaPath,
-      '--silent',
-      '--write',
-      coveragePath,
-    ],
-    { cwd: repoRoot, stdio: 'inherit' },
-  )
+  try {
+    execFileSync(
+      'bunx',
+      [
+        'graphql-inspector',
+        'coverage',
+        documentsGlob,
+        app.schemaPath,
+        '--silent',
+        '--write',
+        coveragePath,
+      ],
+      { cwd: repoRoot, stdio: 'inherit' },
+    )
+  } catch {
+    // Report and fail this API only — the remaining APIs must still be checked.
+    console.error(
+      `❌ graphql-inspector coverage failed for ${app.appPath} — check the schema and the documents in ${frontendApps.join(', ')}.\n`,
+    )
+    return 1
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- JSON.parse returns any
   const coverage: Coverage = JSON.parse(readFileSync(coveragePath, 'utf-8'))
@@ -510,10 +536,10 @@ export const findUnusedGraphql = async (): Promise<number> => {
     .map(([typeName]) => typeName)
 
   console.log('Scanning resolvers and DTOs…\n')
-  const project = new Project({ tsConfigFilePath })
-  const { entries, parentNeeds, unparseable } = await extractEntries()
-  const { dtoBySchemaName, hiddenFieldPairs } = extractDtos(project)
-  const backendAccesses = extractBackendAccesses(project)
+  const project = new Project({ tsConfigFilePath: app.tsConfigFilePath })
+  const { entries, parentNeeds, unparseable } = await extractEntries(app)
+  const { dtoBySchemaName, hiddenFieldPairs } = extractDtos(project, app)
+  const backendAccesses = extractBackendAccesses(project, app)
 
   const knownSchemaTypes = new Set(Object.keys(coverage.types))
   const resolveSchemaType = (rawType: string): string | null => {
@@ -532,7 +558,7 @@ export const findUnusedGraphql = async (): Promise<number> => {
       ? resolveSchemaType(entry.parentType)
       : entry.parentType
 
-  const schema = buildSchema(readFileSync(schemaPath, 'utf-8'))
+  const schema = buildSchema(readFileSync(app.schemaPath, 'utf-8'))
 
   const externalTypes = new Set<string>()
   const visitExternal = (typeName: string): void => {
@@ -732,7 +758,7 @@ export const findUnusedGraphql = async (): Promise<number> => {
     unresolved.length === 0 &&
     unparseable.length === 0
   ) {
-    console.log('✅ All GraphQL fields are used!')
+    console.log(`✅ All GraphQL fields in ${app.appPath} are used!`)
     return 0
   }
 
@@ -812,4 +838,25 @@ export const findUnusedGraphql = async (): Promise<number> => {
   console.log('Remove unused items, or add @ApiKeyAuth if used externally.\n')
 
   return 1
+}
+
+export const findUnusedGraphql = async (): Promise<number> => {
+  const apiApps = discoverApiApps(repoRoot)
+  if (apiApps.length === 0) {
+    console.error(
+      '❌ No API apps found — expected `apps/api` or `apps/*-api` with a `tsconfig.json`.',
+    )
+    return 1
+  }
+  let exitCode = 0
+  for (const app of apiApps) {
+    if (apiApps.length > 1) {
+      console.log(`── ${app.appPath} ──\n`)
+    }
+    const code = await runForApp(app)
+    if (code !== 0) {
+      exitCode = code
+    }
+  }
+  return exitCode
 }

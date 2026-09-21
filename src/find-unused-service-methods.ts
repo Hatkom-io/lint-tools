@@ -14,11 +14,16 @@
  *   - Decorated members (assumed framework-invoked, e.g. @Cron, @OnEvent)
  *   - NestJS lifecycle hooks
  *
+ * Every API app in the monorepo is scanned: `apps/api` plus any `apps/*-api`
+ * (e.g. `portal-api`, `sfs-api`). Each is loaded as its own ts-morph project,
+ * so a method is only considered used if it is called inside its own app.
+ *
  * Run from the consumer monorepo root via `lint-tools`.
  *
  * Returns 1 if any unused method/property is found.
  */
 
+import { existsSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import {
   ClassDeclaration,
@@ -27,10 +32,9 @@ import {
   PropertyDeclaration,
   SyntaxKind,
 } from 'ts-morph'
+import { type ApiApp, discoverApiApps } from './discover-apis'
 
 const repoRoot = process.cwd()
-const tsConfigFilePath = join(repoRoot, 'apps/api/tsconfig.json')
-const serviceGlob = join(repoRoot, 'apps/api/src/**/*.service.ts')
 
 const lifecycleHooks = new Set([
   'onModuleInit',
@@ -132,12 +136,19 @@ const collectDead = (cls: ClassDeclaration, file: string): Dead[] => {
   })
 }
 
-export const findUnusedServiceMethods = async (): Promise<number> => {
-  console.log('Loading TypeScript project…')
-  const project = new Project({ tsConfigFilePath })
+const runForApp = (app: ApiApp): number => {
+  if (!existsSync(app.tsConfigFilePath)) {
+    console.error(
+      `❌ No \`${app.appPath}/tsconfig.json\` found — it is required to load the project.`,
+    )
+    return 1
+  }
+
+  console.log(`Loading TypeScript project for ${app.appPath}…`)
+  const project = new Project({ tsConfigFilePath: app.tsConfigFilePath })
 
   const serviceFiles = project
-    .getSourceFiles(serviceGlob)
+    .getSourceFiles(join(app.srcPath, '**/*.service.ts'))
     .filter((sf) => !sf.getFilePath().includes('/node_modules/'))
 
   console.log(`Scanning ${serviceFiles.length} service files…\n`)
@@ -148,7 +159,7 @@ export const findUnusedServiceMethods = async (): Promise<number> => {
   })
 
   if (dead.length === 0) {
-    console.log('✅ All service methods are used!')
+    console.log(`✅ All service methods in ${app.appPath} are used!`)
     return 0
   }
 
@@ -171,4 +182,26 @@ export const findUnusedServiceMethods = async (): Promise<number> => {
 
   console.log('Remove unused members, or @Inject into another consumer.\n')
   return 1
+}
+
+export const findUnusedServiceMethods = async (): Promise<number> => {
+  const apiApps = discoverApiApps(repoRoot)
+  if (apiApps.length === 0) {
+    console.error(
+      '❌ No API apps found — expected `apps/api` or `apps/*-api` with a `tsconfig.json`.',
+    )
+    return 1
+  }
+
+  let exitCode = 0
+  for (const app of apiApps) {
+    if (apiApps.length > 1) {
+      console.log(`── ${app.appPath} ──\n`)
+    }
+    const code = runForApp(app)
+    if (code !== 0) {
+      exitCode = code
+    }
+  }
+  return exitCode
 }
