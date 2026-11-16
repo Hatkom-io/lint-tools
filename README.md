@@ -53,6 +53,20 @@ monorepo, anything unselected is dead. Items behind `@ApiKeyAuth` (and the types
 reachable from them) are skipped — external API consumers are invisible from
 inside the repo.
 
+To keep one unselected item on purpose, such as a development-only debug query,
+decorate it with `@KeepUnused`. It does nothing at runtime, so the consuming app
+lists `@hatkom/lint-tools` under `dependencies`. Import it under its own name:
+the check finds it in the source text, so an alias hides it. Unlike
+`@ApiKeyAuth`, it skips only that item, not the types it returns.
+
+```ts
+import { KeepUnused } from '@hatkom/lint-tools/decorators'
+
+@KeepUnused('development-only debug query')
+@Query()
+pdfInputData(id: NoticeId): Promise<string> { … }
+```
+
 Reads each API's `schema.gql`, runs `graphql-inspector coverage` against the
 frontend apps bound to that schema, then cross-references resolver decorators.
 Exits `1` on any unused item, or if a resolver entry can't be parsed (so dead

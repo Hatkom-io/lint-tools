@@ -6,7 +6,7 @@
     "rootDir": "./src",
     "outDir": "./dist",
     "resolveJsonModule": true,
-    "declaration": false,
+    "declaration": true,
     "sourceMap": true,
     "removeComments": true,
     "noEmit": false,

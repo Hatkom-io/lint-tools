@@ -15,6 +15,13 @@
   "bin": {
     "lint-tools": "dist/cli.js"
   },
+  "exports": {
+    "./decorators": {
+      "types": "./dist/decorators.d.ts",
+      "default": "./dist/decorators.js"
+    },
+    "./package.json": "./package.json"
+  },
   "files": [
     "dist"
   ],

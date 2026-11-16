@@ -17,6 +17,10 @@
  *   - Unused @Field properties on @InputType inputs (best-effort — see note)
  *   - Fields selected nowhere but read in resolvers/services → @HideField()
  *
+ * Items decorated with @KeepUnused (exported from `@hatkom/lint-tools/decorators`)
+ * are skipped as deliberate exceptions; unlike @ApiKeyAuth, the types they return
+ * are still checked.
+ *
  * Items decorated with @ApiKeyAuth are skipped — external API consumers
  * are not visible from inside the monorepo. Types transitively reachable
  * from @ApiKeyAuth queries/mutations/resolve fields (return types, field
@@ -55,6 +59,7 @@ import {
   isUnionType,
 } from 'graphql'
 import { ClassDeclaration, Project, SyntaxKind } from 'ts-morph'
+import { KeepUnused } from './decorators'
 import { type ApiApp, discoverApiApps, isApiAppName } from './discover-apis'
 
 const repoRoot = process.cwd()
@@ -115,6 +120,7 @@ type Entry = {
   file: string
   line: number
   hasApiKeyAuth: boolean
+  isKept: boolean
 }
 
 type ParentDestructure = {
@@ -209,14 +215,17 @@ const parseField = (
   return { fieldName: methodName, parentType: kind }
 }
 
-const hasApiKeyAuth = (lines: string[], from: number, to: number): boolean => {
-  for (let k = Math.max(0, from); k <= to; k++) {
-    if (lines[k]?.includes('@ApiKeyAuth')) {
-      return true
-    }
-  }
-  return false
+const keepUnusedMarker = `@${KeepUnused.name}(`
+
+type DecoratorSearch = {
+  lines: string[]
+  from: number
+  to: number
+  marker: string
 }
+
+const hasDecorator = ({ lines, from, to, marker }: DecoratorSearch): boolean =>
+  lines.slice(Math.max(0, from), to + 1).some((line) => line.includes(marker))
 
 const parseReturnType = (decoratorBlock: string): string | null => {
   const [, returnType] =
@@ -333,7 +342,18 @@ const extractEntries = async (
         returnType: parseReturnType(decoratorBlock),
         file: `${app.appPath}/src/${file}`,
         line: methodLineIndex + 1,
-        hasApiKeyAuth: hasApiKeyAuth(lines, i - 5, methodLineIndex - 1),
+        hasApiKeyAuth: hasDecorator({
+          lines,
+          from: i - 5,
+          to: methodLineIndex - 1,
+          marker: '@ApiKeyAuth',
+        }),
+        isKept: hasDecorator({
+          lines,
+          from: i - 5,
+          to: methodLineIndex - 1,
+          marker: keepUnusedMarker,
+        }),
       })
 
       if (decoratorKind === 'ResolveField') {
@@ -625,7 +645,7 @@ const runForApp = async (app: ApiApp): Promise<number> => {
 
   const unresolved: Entry[] = []
   const dead = entries.filter((entry) => {
-    if (entry.hasApiKeyAuth) {
+    if (entry.hasApiKeyAuth || entry.isKept) {
       return false
     }
     const schemaType = resolveEntrySchemaType(entry)
@@ -833,9 +853,11 @@ const runForApp = async (app: ApiApp): Promise<number> => {
   )
 
   console.log(
-    'Note: Items with @ApiKeyAuth are skipped (external API consumers).',
+    'Note: Items with @ApiKeyAuth are skipped (external API consumers), and so are items with @KeepUnused.',
   )
-  console.log('Remove unused items, or add @ApiKeyAuth if used externally.\n')
+  console.log(
+    "Remove unused items, add @ApiKeyAuth if used externally, or @KeepUnused('<reason>') from @hatkom/lint-tools/decorators to keep one deliberately.\n",
+  )
 
   return 1
 }
