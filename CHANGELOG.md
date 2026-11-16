@@ -1,3 +1,10 @@
+# [1.5.0](https://github.com/Hatkom-io/lint-tools/compare/v1.4.0...v1.5.0) (2026-11-16)
+
+
+### Features
+
+* expose KeepUnused decorator for skipping linting unused code ([c162359](https://github.com/Hatkom-io/lint-tools/commit/c16235954dfb74d7ec0d761a55968ab371b081da))
+
 # [1.4.0](https://github.com/Hatkom-io/lint-tools/compare/v1.3.0...v1.4.0) (2026-09-21)
 
 
