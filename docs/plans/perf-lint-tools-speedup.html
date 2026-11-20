@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Plan: lint-tools speedup</title>
+<style>
+body { font: 15px/1.5 system-ui, sans-serif; max-width: 60rem; margin: 2rem auto; padding: 0 1rem; }
+code, pre { font: 13px ui-monospace, monospace; }
+pre { background: #f4f4f4; padding: .75rem; overflow-x: auto; }
+h2 { border-bottom: 1px solid #ddd; }
+</style>
+</head>
+<body>
+<h1>Plan: make <code>lint-tools</code> fast with identical findings</h1>
+
+<h2>Context</h2>
+<p>In the SFS monorepo, <code>bun lint-tools</code> runs uncached and serially after turbo on every <code>ci:lint</code>: 24.8s measured on 2026-11-20 (unused service methods 17.3s, unused GraphQL 9.0s). Profiling on SFS <code>apps/api</code> (451 candidate members, 1,090 project files, 4,437 program files incl. 23.8 MB of <code>node_modules</code> declarations):</p>
+<ul>
+<li>ts-morph <code>Project</code> load from <code>tsconfig.json</code>: ~2.1s for api, ~1.1s for portal-api. Each check loads its own, so this is paid twice per app.</li>
+<li><code>findReferencesAsNodes()</code> for each candidate member: ~6.5–8s total for api. Each call is a full language-service find-references: it text-scans every program file (including the Prisma client declarations, where names like <code>create</code>/<code>update</code>/<code>findMany</code> occur thousands of times) and resolves a symbol at each occurrence.</li>
+<li>Prototype of the pre-pass below on SFS: proves all 451 api members and all 28 portal-api members used in ~2.2s / ~0.45s (including building the type checker), with no find-references fallback calls; dead set identical to the current algorithm.</li>
+</ul>
+
+<h2>Changes</h2>
+
+<h3>1. Service methods: one direct-reference pass, find-references only as fallback</h3>
+<p>In <code>src/find-unused-service-methods.ts</code>, keep candidate selection exactly as today (<code>@Injectable</code> classes in <code>**/*.service.ts</code>; methods and properties; <code>isCandidate</code> unchanged: private, decorated, lifecycle hooks, <code>dead-code-ignore-next-line</code>, property initializer must be an arrow function or function expression; name must be an <code>Identifier</code>). Then:</p>
+<ol>
+<li>Collect all candidates of the app first (instead of deciding member by member). Map each candidate's declaration symbol (<code>checker.getSymbolAtLocation(nameNode.compilerNode)</code>) to the candidate, and collect the set of candidate names.</li>
+<li>Pre-pass: using the language service's program and type checker (<code>project.getLanguageService().compilerObject.getProgram()</code>, the same program find-references uses, so node/symbol bindings are shared), walk every program source file that is not a declaration file and not under <code>/node_modules/</code> with raw <code>ts.forEachChild</code> (no ts-morph wrapping). For each <code>PropertyAccessExpression</code> whose name text is a candidate name, resolve <code>checker.getSymbolAtLocation(name)</code>; if any of <code>checker.getRootSymbols(symbol)</code> is a candidate's symbol, mark that candidate used.</li>
+<li>Fallback: for each candidate not marked used, run the existing check unchanged (<code>nameNode.findReferencesAsNodes()</code>, filter out <code>nameNode</code>, dead if empty).</li>
+<li>Report in the same order and format as today (by file, then class, then member, in source order).</li>
+</ol>
+<p><b>Why findings are identical by construction.</b> The pre-pass only ever marks a member used; it never marks one dead. A member is reported dead only by the unchanged find-references call. So the pre-pass can change a finding only if it marks used a member that find-references would report unused. It cannot: for a property-access name, TypeScript's find-references (<code>getReferencesAtLocation</code> → <code>getRelatedSymbol</code> → <code>forEachRelatedSymbol</code>, checked in the bundled TypeScript of <code>@ts-morph/common</code> 0.28.1) resolves the same <code>getSymbolAtLocation</code>, takes <code>getRootSymbols</code> of it, and reports the location when a root symbol is in the search set, which always contains the member's own symbol. Such a location is never a definition, so ts-morph's <code>findReferencesAsNodes</code> yields it, and it is not the member's own name node. Find-references searches every program file, a superset of what the pre-pass scans. The root-symbol step matters: in SFS, call sites like <code>this.managerService.update(…)</code> resolve to a transient (instantiated) symbol whose root is the declared member; exact symbol identity proves only 33 of 451 members.</p>
+<p>Anything the pre-pass does not cover (element access <code>svc['m']</code>, destructuring, object-literal / shorthand properties, calls through an interface or base class, unions without the member as a root, references only in declaration files) falls back to find-references, so behaviour there is unchanged and only the speed differs.</p>
+
+<h3>2. One ts-morph Project per API app, shared by both checks</h3>
+<p>Add a small memoized loader (one function, a <code>Map</code> keyed by <code>tsConfigFilePath</code>) in a new <code>src/load-project.ts</code>. Both <code>find-unused-graphql.ts</code> (which currently does <code>new Project(...)</code> after running the coverage) and <code>find-unused-service-methods.ts</code> call it. The GraphQL check only reads syntax; the service check later builds the type checker on the same Project. The check order and every console line stay the same; the <code>Loading TypeScript project for …</code> line stays printed by the service check even when the project is already loaded.</p>
+<p>The cache lives for the CLI process (both checks run in one process from <code>cli.ts</code>), so both apps' projects stay in memory until exit. SFS api + portal-api fit comfortably; no eviction.</p>
+
+<h3>3. Docs</h3>
+<p>Update the header comment of <code>find-unused-service-methods.ts</code> to describe the pass + fallback. README wording ("via ts-morph reference analysis") stays accurate; no README change.</p>
+
+<h2>Verification</h2>
+<ul>
+<li><code>bun run build</code> (tsc, strict) and <code>bunx biome check src</code>.</li>
+<li>SFS: in a clean SFS worktree at <code>origin/main</code> with freshly generated <code>schema.gql</code> for api and portal-api (the main checkout's api schema is stale and makes graphql-inspector fail), run the baseline build of <code>origin/main</code> (1.5.0) and the branch build, each as <code>bun &lt;lint-tools&gt;/dist/cli.js</code> from the SFS root, 3 runs each. Diff the full output (stdout + stderr, exit code) and report wall time before/after.</li>
+<li>Fallback path: SFS has zero unused service members and the pre-pass proves everything there, so the fallback is not exercised by SFS. Build a throwaway fixture monorepo (scratch, not committed) whose services cover: a truly unused method and arrow property, a member used only via <code>svc['m']</code>, only via destructuring, only via an interface-typed variable, only in a subclass call, only in its own class (<code>this.m()</code>), a function-expression property, private / decorated / lifecycle / ignore-marker members, and a member called through a generic instantiation. Diff baseline vs branch output on it.</li>
+<li>Extra corpus: run baseline vs branch on the TGT monorepo's API too if it uses the same layout, diff output.</li>
+</ul>
+
+<h2>Not building</h2>
+<ul>
+<li>A committed test suite: the repo has no tests or test CI; equivalence is verified with the baseline-vs-branch diffs above.</li>
+<li>Overlapping the <code>graphql-inspector</code> subprocess with project loading, or running checks/apps in parallel: it would interleave output and change its order.</li>
+<li>Turbo caching of lint-tools in SFS (rejected upstream: inputs change on nearly every PR).</li>
+<li>Bumping <code>@hatkom/lint-tools</code> in SFS: done after merge and release.</li>
+</ul>
+
+<h2>Follow-ups</h2>
+<ul>
+<li>SFS: bump <code>@hatkom/lint-tools</code> in the root <code>package.json</code> once this is released (SFS is on 1.4.0).</li>
+</ul>
+
+<h2>Release</h2>
+<p>Commit as <code>perf: …</code>; semantic-release's default commit analyzer cuts a patch release on merge to main.</p>
+</body>
+</html>
