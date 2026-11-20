@@ -158,6 +158,9 @@ const findAccessedCandidates = (
   candidates: Candidate[],
 ): Set<Candidate> => {
   const accessed = new Set<Candidate>()
+  if (candidates.length === 0) {
+    return accessed
+  }
   const program = project.getLanguageService().compilerObject.getProgram()
   if (!program) {
     return accessed
