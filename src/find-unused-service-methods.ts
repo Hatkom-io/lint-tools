@@ -19,8 +19,9 @@
  * so a method is only considered used if it is called inside its own app.
  *
  * A member is reported only when a language-service find-references search
- * finds no reference to it. That search is slow, so one pass over the app's
- * own source first marks every member reached through a property access
+ * finds no reference to it. That search is slow, so one pass over the
+ * program's source files outside `node_modules` (workspace packages the app
+ * imports included) first marks every member reached through a property access
  * (`this.service.member`) whose symbol, or one of its root symbols, is the
  * member: find-references reports every such access, so skipping the search
  * for these members cannot change the findings. The pass skips names spelled
@@ -149,7 +150,8 @@ const collectCandidates = (
 }
 
 /**
- * Candidates reached through a property access in the app's own source. Uses
+ * Candidates reached through a property access in any source file of the
+ * app's program outside `node_modules`, declaration files excluded. Uses
  * the language service's program, the one find-references searches, so the
  * symbols match.
  */
