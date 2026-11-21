@@ -1,3 +1,11 @@
+## [1.5.1](https://github.com/Hatkom-io/lint-tools/compare/v1.5.0...v1.5.1) (2026-11-21)
+
+
+### Performance Improvements
+
+* skip find-references for directly accessed service members and share one project per app ([a01c112](https://github.com/Hatkom-io/lint-tools/commit/a01c1121903c9e7b4919b9a645ca27c43ab1c493))
+* skip the reference pass when an app has no candidate members ([dad0e8f](https://github.com/Hatkom-io/lint-tools/commit/dad0e8f83e0d60420c9714f4c3ba99ca907a74db))
+
 # [1.5.0](https://github.com/Hatkom-io/lint-tools/compare/v1.4.0...v1.5.0) (2026-11-16)
 
 
