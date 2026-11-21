@@ -61,6 +61,7 @@ import {
 import { ClassDeclaration, Project, SyntaxKind } from 'ts-morph'
 import { KeepUnused } from './decorators'
 import { type ApiApp, discoverApiApps, isApiAppName } from './discover-apis'
+import { loadProject } from './load-project'
 
 const repoRoot = process.cwd()
 
@@ -556,7 +557,7 @@ const runForApp = async (app: ApiApp): Promise<number> => {
     .map(([typeName]) => typeName)
 
   console.log('Scanning resolvers and DTOs…\n')
-  const project = new Project({ tsConfigFilePath: app.tsConfigFilePath })
+  const project = loadProject(app.tsConfigFilePath)
   const { entries, parentNeeds, unparseable } = await extractEntries(app)
   const { dtoBySchemaName, hiddenFieldPairs } = extractDtos(project, app)
   const backendAccesses = extractBackendAccesses(project, app)

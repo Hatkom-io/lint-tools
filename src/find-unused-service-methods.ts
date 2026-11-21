@@ -18,6 +18,17 @@
  * (e.g. `portal-api`, `sfs-api`). Each is loaded as its own ts-morph project,
  * so a method is only considered used if it is called inside its own app.
  *
+ * A member is reported only when a language-service find-references search
+ * finds no reference to it. That search is slow, so one pass over the
+ * program's source files outside `node_modules` (workspace packages the app
+ * imports included) first marks every member reached through a property access
+ * (`this.service.member`) whose symbol, or one of its root symbols, is the
+ * member: find-references reports every such access, so skipping the search
+ * for these members cannot change the findings. The pass skips names spelled
+ * with Unicode escapes, which find-references' raw-text search cannot see.
+ * Every other form of use (element access, destructuring, calls through an
+ * interface or base class) is left to the search.
+ *
  * Run from the consumer monorepo root via `lint-tools`.
  *
  * Returns 1 if any unused method/property is found.
@@ -27,12 +38,15 @@ import { existsSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import {
   ClassDeclaration,
+  Identifier,
   MethodDeclaration,
   Project,
   PropertyDeclaration,
   SyntaxKind,
+  ts,
 } from 'ts-morph'
 import { type ApiApp, discoverApiApps } from './discover-apis'
+import { loadProject } from './load-project'
 
 const repoRoot = process.cwd()
 
@@ -93,7 +107,12 @@ const isCandidate = (
   return true
 }
 
-const collectDead = (cls: ClassDeclaration, file: string): Dead[] => {
+type Candidate = Dead & { nameNode: Identifier }
+
+const collectCandidates = (
+  cls: ClassDeclaration,
+  file: string,
+): Candidate[] => {
   const isInjectable = cls
     .getDecorators()
     .some((decorator) => decorator.getName() === 'Injectable')
@@ -118,23 +137,83 @@ const collectDead = (cls: ClassDeclaration, file: string): Dead[] => {
       return []
     }
 
-    const references = nameNode.findReferencesAsNodes()
-    const external = references.filter((ref) => ref !== nameNode)
-
-    if (external.length > 0) {
-      return []
-    }
-
     return [
       {
         file,
         line: member.getStartLineNumber(),
         className,
         memberName: member.getName(),
+        nameNode,
       },
     ]
   })
 }
+
+/**
+ * Candidates reached through a property access in any source file of the
+ * app's program outside `node_modules`, declaration files excluded. Uses
+ * the language service's program, the one find-references searches, so the
+ * symbols match.
+ */
+const findAccessedCandidates = (
+  project: Project,
+  candidates: Candidate[],
+): Set<Candidate> => {
+  const accessed = new Set<Candidate>()
+  if (candidates.length === 0) {
+    return accessed
+  }
+  const program = project.getLanguageService().compilerObject.getProgram()
+  if (!program) {
+    return accessed
+  }
+  const checker = program.getTypeChecker()
+
+  const bySymbol = new Map<ts.Symbol, Candidate>()
+  for (const candidate of candidates) {
+    const symbol = checker.getSymbolAtLocation(candidate.nameNode.compilerNode)
+    if (symbol) {
+      bySymbol.set(symbol, candidate)
+    }
+  }
+  const names = new Set(candidates.map(({ memberName }) => memberName))
+
+  for (const sourceFile of program.getSourceFiles()) {
+    if (
+      sourceFile.isDeclarationFile ||
+      sourceFile.fileName.includes('/node_modules/')
+    ) {
+      continue
+    }
+
+    const visit = (node: ts.Node): void => {
+      if (ts.isPropertyAccessExpression(node)) {
+        const { name } = node
+        if (
+          ts.isIdentifier(name) &&
+          names.has(name.text) &&
+          sourceFile.text.slice(name.getStart(sourceFile), name.end) ===
+            name.text
+        ) {
+          const symbol = checker.getSymbolAtLocation(name)
+          for (const root of symbol ? checker.getRootSymbols(symbol) : []) {
+            const candidate = bySymbol.get(root)
+            if (candidate) {
+              accessed.add(candidate)
+            }
+          }
+        }
+      }
+      ts.forEachChild(node, visit)
+    }
+    visit(sourceFile)
+  }
+
+  return accessed
+}
+
+const hasNoReferences = ({ nameNode }: Candidate): boolean =>
+  nameNode.findReferencesAsNodes().every((ref) => ref === nameNode)
 
 const runForApp = (app: ApiApp): number => {
   if (!existsSync(app.tsConfigFilePath)) {
@@ -145,7 +224,7 @@ const runForApp = (app: ApiApp): number => {
   }
 
   console.log(`Loading TypeScript project for ${app.appPath}…`)
-  const project = new Project({ tsConfigFilePath: app.tsConfigFilePath })
+  const project = loadProject(app.tsConfigFilePath)
 
   const serviceFiles = project
     .getSourceFiles(join(app.srcPath, '**/*.service.ts'))
@@ -153,10 +232,14 @@ const runForApp = (app: ApiApp): number => {
 
   console.log(`Scanning ${serviceFiles.length} service files…\n`)
 
-  const dead: Dead[] = serviceFiles.flatMap((sf) => {
+  const candidates = serviceFiles.flatMap((sf) => {
     const file = relative(repoRoot, sf.getFilePath())
-    return sf.getClasses().flatMap((cls) => collectDead(cls, file))
+    return sf.getClasses().flatMap((cls) => collectCandidates(cls, file))
   })
+  const accessed = findAccessedCandidates(project, candidates)
+  const dead: Dead[] = candidates.filter(
+    (candidate) => !accessed.has(candidate) && hasNoReferences(candidate),
+  )
 
   if (dead.length === 0) {
     console.log(`✅ All service methods in ${app.appPath} are used!`)
