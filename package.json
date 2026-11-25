@@ -41,17 +41,17 @@
     "access": "public"
   },
   "dependencies": {
-    "@graphql-inspector/cli": "^7.0.8",
+    "@graphql-inspector/cli": "^7.0.10",
     "graphql": "^17.1.0",
     "ts-morph": "^28.0.0"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.6.8",
+    "@biomejs/biome": "^2.6.9",
     "@semantic-release/changelog": "^7.0.0",
     "@semantic-release/git": "^11.0.1",
     "@semantic-release/github": "^12.0.11",
     "@types/bun": "latest",
-    "@types/node": "^26.6.6",
+    "@types/node": "^26.6.10",
     "typescript": "^7.0.2"
   }
 }
